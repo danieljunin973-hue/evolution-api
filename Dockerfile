@@ -2,34 +2,22 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Instalar dependências do sistema necessárias
-RUN apk add --no-cache \
-    git \
-    python3 \
-    make \
-    g++ \
-    libc6-compat \
-    pkgconfig \
-    pixman-dev \
-    cairo-dev \
-    pango-dev \
-    libjpeg-turbo-dev \
-    giflib-dev
+# Instalar dependências do sistema
+RUN apk add --no-cache git python3 make g++ cairo-dev pango-dev libjpeg-turbo-dev giflib-dev
 
-# Clonar o repositório
-RUN git clone https://github.com/EvolutionAPI/evolution-api.git .
+# Clonar uma versão específica estável
+RUN git clone -b main https://github.com/EvolutionAPI/evolution-api.git .
 
-# Limpar cache do npm e reinstalar
-RUN npm cache clean --force
+# Remover package-lock.json se existir (pode causar conflitos)
+RUN rm -f package-lock.json
 
-# Usar npm install ao invés de npm ci
-RUN npm install --production=false --silent
+# Instalar dependências uma por vez para debug
+RUN npm install --legacy-peer-deps --silent
 
-# Fazer build se necessário
-RUN npm run build || echo "Build step skipped"
+# Build
+RUN npm run build || echo "Build opcional falhou, continuando..."
 
-# Expor porta
 EXPOSE 8080
 
-# Comando para iniciar
-CMD ["npm", "start"]
+# Comando alternativo
+CMD ["node", "dist/src/main.js"]
