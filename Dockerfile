@@ -1,23 +1,51 @@
-FROM node:18-alpine
+FROM node:20-alpine AS builder
 
-WORKDIR /app
+RUN apk update && \
+    apk add --no-cache git ffmpeg wget curl bash openssl dos2unix
 
-# Instalar dependências do sistema
-RUN apk add --no-cache git python3 make g++ cairo-dev pango-dev libjpeg-turbo-dev giflib-dev
+LABEL version="2.3.1" description="Api to control whatsapp features through http requests."
+LABEL maintainer="Davidson Gomes" git="https://github.com/DavidsonGomes"
+LABEL contact="contato@evolution-api.com"
 
-# Clonar uma versão específica estável
-RUN git clone -b main https://github.com/EvolutionAPI/evolution-api.git .
+WORKDIR /evolution
 
-# Remover package-lock.json se existir (pode causar conflitos)
-RUN rm -f package-lock.json
+# Clonar o repositório completo primeiro
+RUN git clone https://github.com/EvolutionAPI/evolution-api.git temp && \
+    cp -r temp/* . && \
+    cp -r temp/.* . 2>/dev/null || true && \
+    rm -rf temp
 
-# Instalar dependências uma por vez para debug
-RUN npm install --legacy-peer-deps --silent
+# Agora os arquivos existem, podemos prosseguir com o build original
+RUN npm ci --silent
 
-# Build
-RUN npm run build || echo "Build opcional falhou, continuando..."
+RUN chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
+RUN ./Docker/scripts/generate_database.sh
+RUN npm run build
+
+FROM node:20-alpine AS final
+
+RUN apk update && \
+    apk add tzdata ffmpeg bash openssl
+
+ENV TZ=America/Sao_Paulo
+ENV DOCKER_ENV=true
+
+WORKDIR /evolution
+
+COPY --from=builder /evolution/package.json ./package.json
+COPY --from=builder /evolution/package-lock.json ./package-lock.json
+COPY --from=builder /evolution/node_modules ./node_modules
+COPY --from=builder /evolution/dist ./dist
+COPY --from=builder /evolution/prisma ./prisma
+COPY --from=builder /evolution/manager ./manager
+COPY --from=builder /evolution/public ./public
+COPY --from=builder /evolution/.env ./.env
+COPY --from=builder /evolution/Docker ./Docker
+COPY --from=builder /evolution/runWithProvider.js ./runWithProvider.js
+COPY --from=builder /evolution/tsup.config.ts ./tsup.config.ts
+
+ENV DOCKER_ENV=true
 
 EXPOSE 8080
 
-# Comando alternativo
-CMD ["node", "dist/src/main.js"]
+ENTRYPOINT ["/bin/bash", "-c", ". ./Docker/scripts/deploy_database.sh && npm run start:prod"]
